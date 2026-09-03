@@ -1,0 +1,26 @@
+# =============================================================================
+# Finance Controller — Docker Compose (Local Development)
+# =============================================================================
+# Starts a PostgreSQL 16 instance for local development.
+#
+# Usage:
+#   docker-compose up -d          # start in background
+#   docker-compose down           # stop
+#   docker-compose down -v        # stop and remove data volume
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: finance_controller_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: finance_controller
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

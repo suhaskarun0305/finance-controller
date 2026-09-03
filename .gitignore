@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+
+# Database (local SQLite)
+*.db
+*.sqlite3
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Generated data & reports
+data/generated/*.json
+data/raw/*.csv
+
+# Logs
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Node/Frontend
+node_modules/
+frontend/.next/
+frontend/dist/

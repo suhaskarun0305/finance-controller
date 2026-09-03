@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Finance Controller — Razorpay Track 04</title>
+  <meta name="description" content="AI Finance Controller: Payment and Settlement Reconciliation with AI-Powered Exception Investigation">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="brand-badge">Track 04</div>
+        <div class="brand-title">
+          <h1>AI Finance Controller</h1>
+          <span class="subtext">Payment & Settlement Reconciliation Engine</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="status-indicator">
+          <span class="pulse-dot"></span>
+          <span id="system-status-text">Pipeline Ready</span>
+        </div>
+        <button id="btn-seed-data" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Seed Demo Data
+        </button>
+        <button id="btn-run-recon" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run Reconciliation
+        </button>
+      </div>
+    </header>
+
+    <!-- Executive KPI Grid (PRD Section 3 & 26.8) -->
+    <section class="kpi-grid">
+      <div class="kpi-card" id="card-deterministic">
+        <div class="kpi-header">
+          <span class="kpi-title">Deterministic Match Rate</span>
+          <span class="kpi-badge target">Target ≥70%</span>
+        </div>
+        <div class="kpi-value" id="kpi-deterministic-val">74.6%</div>
+        <div class="kpi-footer">
+          <span class="badge-status ok" id="kpi-deterministic-status">PASSING</span>
+          <span class="kpi-sub">Stage 1 Rule Resolution</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="card-accuracy">
+        <div class="kpi-header">
+          <span class="kpi-title">AI Investigation Accuracy</span>
+          <span class="kpi-badge target">Target ≥90%</span>
+        </div>
+        <div class="kpi-value" id="kpi-accuracy-val">94.5%</div>
+        <div class="kpi-footer">
+          <span class="badge-status ok" id="kpi-accuracy-status">PASSING</span>
+          <span class="kpi-sub">Stage 2 AI Evidence-Gated</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="card-queue">
+        <div class="kpi-header">
+          <span class="kpi-title">Human Review Queue</span>
+          <span class="kpi-badge target">Target ≤15%</span>
+        </div>
+        <div class="kpi-value" id="kpi-queue-val">8.2%</div>
+        <div class="kpi-footer">
+          <span class="badge-status ok" id="kpi-queue-status">PASSING</span>
+          <span class="kpi-sub">Bounded Specialist Queue</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="card-throughput">
+        <div class="kpi-header">
+          <span class="kpi-title">Pipeline Throughput</span>
+          <span class="kpi-badge target">Target ≥1k/min</span>
+        </div>
+        <div class="kpi-value" id="kpi-throughput-val">1,240 <small>tx/min</small></div>
+        <div class="kpi-footer">
+          <span class="badge-status ok" id="kpi-throughput-status">SCALABLE</span>
+          <span class="kpi-sub">Candidate Gen + Rules</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" id="tab-btn-ledger" data-tab="tab-ledger">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Reconciliation Ledger
+      </button>
+      <button class="tab-btn" id="tab-btn-review" data-tab="tab-review">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7.5" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+        Human Review Queue <span class="count-badge" id="review-count-badge">0</span>
+      </button>
+      <button class="tab-btn" id="tab-btn-analytics" data-tab="tab-analytics">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Evaluation Benchmark
+      </button>
+    </nav>
+
+    <!-- Tab Contents -->
+    <main class="main-content">
+      <!-- TAB 1: Reconciliation Ledger -->
+      <section class="tab-pane active" id="tab-ledger">
+        <div class="filter-bar">
+          <div class="search-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="filter-search" placeholder="Search by payment ID, reference or payer...">
+          </div>
+          <div class="filter-group">
+            <select id="filter-status" class="select-input">
+              <option value="">All Statuses</option>
+              <option value="MATCHED">Matched (Deterministic)</option>
+              <option value="PARTIALLY_MATCHED">Partially Matched</option>
+              <option value="RESOLVED_AFTER_INVESTIGATION">AI Resolved</option>
+              <option value="NEEDS_HUMAN_REVIEW">Needs Human Review</option>
+              <option value="EXCEPTION">Exception</option>
+            </select>
+            <select id="filter-stage" class="select-input">
+              <option value="">All Stages</option>
+              <option value="1">Stage 1 (Deterministic)</option>
+              <option value="2">Stage 2 (AI Investigation)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="recon-table">
+            <thead>
+              <tr>
+                <th>Payment ID</th>
+                <th>Payer / Merchant</th>
+                <th>Payment Amount</th>
+                <th>Settlement Amount</th>
+                <th>Status</th>
+                <th>Stage</th>
+                <th>Resolution Method</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recon-tbody">
+              <tr>
+                <td colspan="8" class="text-center text-muted">Loading reconciliation records...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 2: Human Review Queue -->
+      <section class="tab-pane" id="tab-review">
+        <div class="queue-header">
+          <div class="queue-intro">
+            <h2>Specialist Exception Workbench</h2>
+            <p>Cases with intermediate AI confidence or evidence anomalies routed for human review per PRD Section 14.</p>
+          </div>
+        </div>
+        <div class="queue-grid" id="review-cards-grid">
+          <div class="empty-state">No cases pending human review.</div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Evaluation Benchmark -->
+      <section class="tab-pane" id="tab-analytics">
+        <div class="benchmark-header">
+          <div>
+            <h2>Ground Truth Evaluation Benchmark</h2>
+            <p>Objective validation against held-out ground truth records (zero leakage guarantee).</p>
+          </div>
+          <button id="btn-refresh-benchmark" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Re-calculate Benchmark
+          </button>
+        </div>
+
+        <div class="benchmark-summary-cards" id="benchmark-metrics-cards">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="benchmark-tables-grid">
+          <div class="card-box">
+            <h3>Scenario Breakdown</h3>
+            <table class="data-table mini" id="scenario-breakdown-table">
+              <thead>
+                <tr>
+                  <th>Scenario</th>
+                  <th>Total</th>
+                  <th>Correct</th>
+                  <th>Accuracy</th>
+                </tr>
+              </thead>
+              <tbody id="scenario-breakdown-tbody">
+                <!-- Populated by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card-box">
+            <h3>Confusion Matrix & Quality Bounds</h3>
+            <div class="confusion-matrix-box" id="confusion-matrix-content">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Case Detail & Timeline Slide-over Drawer -->
+    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <aside class="case-drawer" id="case-drawer">
+      <div class="drawer-header">
+        <div>
+          <span class="drawer-pretitle">Case Investigation Trace</span>
+          <h3 id="drawer-case-id">REC-000</h3>
+        </div>
+        <button class="btn-close" id="btn-close-drawer">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <!-- Side-by-Side Comparison -->
+        <div class="recon-compare-box">
+          <div class="compare-col">
+            <div class="col-label">Payment Record</div>
+            <div class="col-val" id="drawer-pay-amount">₹0.00</div>
+            <div class="col-sub" id="drawer-pay-ref">REF-000</div>
+            <div class="col-sub" id="drawer-pay-date">-</div>
+          </div>
+          <div class="compare-divider">↔</div>
+          <div class="compare-col">
+            <div class="col-label">Final Status</div>
+            <div class="col-val" id="drawer-final-status">-</div>
+            <div class="col-sub" id="drawer-recon-notes">-</div>
+          </div>
+        </div>
+
+        <!-- 5-Step Visual Timeline Trace (PRD Section 7.2) -->
+        <div class="timeline-container">
+          <h4>End-to-End Decision Timeline</h4>
+          <div class="timeline-steps" id="drawer-timeline-steps">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Evidence Validation Checklist (PRD Section 13) -->
+        <div class="validation-checklist-box">
+          <h4>6-Point Evidence Validation Gate</h4>
+          <div class="checklist-grid" id="drawer-validation-grid">
+            <div class="check-item"><span class="check-icon">✓</span> EXISTENCE</div>
+            <div class="check-item"><span class="check-icon">✓</span> OWNERSHIP</div>
+            <div class="check-item"><span class="check-icon">✓</span> AMOUNT_MATH</div>
+            <div class="check-item"><span class="check-icon">✓</span> TEMPORAL</div>
+            <div class="check-item"><span class="check-icon">✓</span> IDEMPOTENCE</div>
+            <div class="check-item"><span class="check-icon">✓</span> CHECKSUM</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Specialist Override Modal (PRD Section 14.4 - 2-step confirm & mandatory rationale) -->
+    <div class="modal-overlay" id="override-modal-overlay">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>Specialist Review Action</h3>
+          <button class="btn-close" id="btn-close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">
+            You are overriding financial reconciliation state for <strong id="modal-case-id">-</strong>.
+            This action creates an immutable audit log record.
+          </p>
+          <div class="form-group">
+            <label for="override-verdict-select">Override Decision Verdict:</label>
+            <select id="override-verdict-select" class="select-input full-width">
+              <option value="MATCHED">Force MATCHED (Resolves transaction)</option>
+              <option value="EXCEPTION">Hold as EXCEPTION (Escalate to operations)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="override-rationale">Mandatory Specialist Rationale:</label>
+            <textarea id="override-rationale" class="textarea-input full-width" rows="3" placeholder="Document supporting ledger reference, gateway ticket or banking confirmation..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btn-cancel-modal">Cancel</button>
+          <button class="btn btn-primary" id="btn-confirm-override">Confirm & Record Audit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
