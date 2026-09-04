@@ -40,7 +40,7 @@ if _project_root not in sys.path:
 
 from sqlalchemy import text
 
-from backend.config.settings import DATABASE_URL
+from backend.config.settings import DATABASE_URL, get_safe_database_url
 from backend.database.connection import engine
 from backend.database.session import SessionLocal
 
@@ -52,7 +52,7 @@ def main() -> None:
     print("=" * 60)
     print("  Finance Controller -- Database Connectivity Test")
     print(f"  Backend: {backend_label}")
-    print(f"  URL:     {DATABASE_URL}")
+    print(f"  URL:     {get_safe_database_url()}")
     print("=" * 60)
     print()
 
@@ -132,12 +132,11 @@ def main() -> None:
 
     if is_sqlite:
         print()
-        print("  NOTE: You are using SQLite for local development.")
-        print("  To switch to PostgreSQL:")
-        print("    1. Install PostgreSQL or run: docker-compose up -d")
-        print("    2. Edit .env and uncomment the PostgreSQL DATABASE_URL")
-        print("    3. Comment out the SQLite DATABASE_URL")
-        print("    4. Re-run this test")
+        print("  NOTE: You are using the SQLite fallback (no DATABASE_URL in .env).")
+        print("  To use PostgreSQL / Neon:")
+        print("    1. Set DATABASE_URL in .env to your PostgreSQL connection string")
+        print("       (use the postgresql+psycopg2:// scheme)")
+        print("    2. Re-run this test")
 
 
 if __name__ == "__main__":

@@ -50,7 +50,16 @@ else:
         {
             "pool_size": DB_POOL_SIZE,
             "max_overflow": DB_MAX_OVERFLOW,
-            "pool_pre_ping": True,  # auto-recover stale connections
+            "pool_pre_ping": True,   # auto-recover stale connections
+            "pool_recycle": 300,     # recycle connections after 5 min (Neon drops idle ones)
+            "pool_timeout": 10,      # seconds to wait for a pool slot before error
+            "connect_args": {
+                "connect_timeout": 10,       # libpq: seconds before connect() gives up
+                "keepalives": 1,             # enable TCP keepalives
+                "keepalives_idle": 30,       # seconds idle before first keepalive
+                "keepalives_interval": 10,   # seconds between keepalives
+                "keepalives_count": 5,       # failed keepalives before dropping
+            },
         }
     )
 

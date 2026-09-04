@@ -11,7 +11,7 @@ as UNMATCHED (stage=1) to be passed through to Stage 2 AI Investigation.
 """
 
 import time
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
