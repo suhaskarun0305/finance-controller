@@ -1,10 +1,10 @@
 # Project Status
 
 ## Last verified
-2026-09-05 13:50 IST
+2026-09-05 14:05 IST
 
 ## Overall status
-Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational and runtime-verified, with observable and secret-safe OpenAI telemetry and deterministic local fallback.
+Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational and runtime-verified, with observable and secret-safe OpenAI telemetry, explicit `reasoning_provider` tracking, decoupled validation reporting, and deterministic local fallback.
 
 ## Completed
 - Verified FastAPI application running locally on port 8000 with CORS support.
@@ -12,9 +12,11 @@ Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational an
 - Verified `GET /api/v1/payments` returns 199 seeded payment records.
 - Verified `POST /api/v1/investigator/run` accepts both `reconciliation_id` and `payment_id` (UUID and `razorpay_payment_id`).
 - Implemented structured logging around OpenAI calls with secret sanitization (no keys or tokens leaked).
-- Implemented observable telemetry and `execution_source` (`OPENAI` | `FALLBACK`) across API response schema, models, and audit logs.
-- Added comprehensive unit and integration tests verifying OpenAI mocked success and failure fallback paths.
-- Verified all 41 test cases pass in `tests/`.
+- Implemented observable telemetry, `reasoning_provider`, `model_provider`, and `execution_source` (`OPENAI` | `FALLBACK`) across API response schema, models, and audit logs.
+- Fixed validation reporting: real `EvidenceValidationResult.passed` is preserved and returned independently of `match_status`.
+- Added comprehensive unit and integration tests verifying OpenAI mocked success, failure fallback, validation pass/fail decoupling, and human review routing.
+- Verified all 45 test cases pass in `tests/`.
+- Verified live end-to-end execution on real payment `21787d67-f578-4e86-b26f-d91d1b4e03a2`.
 
 ## In progress
 - Monitoring live reconciliation exceptions and human review workflows.
@@ -37,15 +39,15 @@ Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational an
 | Deployment | ✅ | ✅ | ✅ | ✅ | ❌ | Local Uvicorn server running on 127.0.0.1:8000 with reload |
 
 ## API status
-- `POST /api/v1/investigator/run` updated with `execution_source` in response schema (`OPENAI` or `FALLBACK`).
+- `POST /api/v1/investigator/run` updated with `reasoning_provider`, `model_provider`, `execution_source`, and decoupled `validation_passed`.
 - CORS middleware active for local web clients and Swagger UI.
 
 ## Database status
 - SQLite database (`finance_controller.db`) connected and seeded with 199 payments, customers, invoices, and settlements.
-- Audit log records immutable snapshots including `execution_source` and sanitized telemetry.
+- Audit log records immutable snapshots including `reasoning_provider`, `execution_source`, and sanitized telemetry.
 
 ## Tests
-- 41 passed, 0 failed, 0 errors (`Ran 41 tests in 20.506s - OK`).
+- 45 passed, 0 failed, 0 errors (`Ran 45 tests in 6.843s - OK`).
 
 ## Deployment
 - Uvicorn running on http://127.0.0.1:8000 with reload enabled.

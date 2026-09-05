@@ -51,6 +51,8 @@ class CandidateExplanationPayload:
     verdict: str = "NEEDS_HUMAN_REVIEW"
     reason: str = "UNKNOWN"
     execution_source: str = "FALLBACK"
+    reasoning_provider: str = "FALLBACK"
+    model_provider: str = "FALLBACK"
 
 
 @dataclass
@@ -116,7 +118,12 @@ def validate_agent_explanation(
     except (ValueError, TypeError):
         confidence = 0.0
 
-    exec_source = str(data.get("execution_source") or default_source).upper().strip()
+    exec_source = str(
+        data.get("reasoning_provider")
+        or data.get("model_provider")
+        or data.get("execution_source")
+        or default_source
+    ).upper().strip()
     if exec_source not in ("OPENAI", "FALLBACK"):
         exec_source = default_source
 
@@ -132,6 +139,8 @@ def validate_agent_explanation(
         verdict=verdict,
         reason=cause.upper(),
         execution_source=exec_source,
+        reasoning_provider=exec_source,
+        model_provider=exec_source,
     )
 
 

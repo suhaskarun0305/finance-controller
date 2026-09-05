@@ -213,15 +213,26 @@ def run_investigator(
     investigator = InvestigatorAgent(db)
     rec = investigator.investigate_payment(payment)
 
-    # Extract cited evidence IDs
-    evidence_ids = []
-    if rec.settlement_id:
-        evidence_ids.append(rec.settlement_id)
-    if rec.invoice_id:
-        evidence_ids.append(rec.invoice_id)
+    # Extract cited evidence IDs from investigation result or linked records
+    evidence_ids = getattr(rec, "evidence_citations", None)
+    if not evidence_ids:
+        evidence_ids = []
+        if rec.settlement_id:
+            evidence_ids.append(rec.settlement_id)
+        if rec.invoice_id:
+            evidence_ids.append(rec.invoice_id)
 
-    validation_passed = rec.match_status in ("RESOLVED_AFTER_INVESTIGATION", "MATCHED")
+    # Preserve real evidence-gater result without inferring solely from match_status
+    if hasattr(rec, "validation_passed") and rec.validation_passed is not None:
+        validation_passed = bool(rec.validation_passed)
+    elif investigator.last_validation_result is not None:
+        validation_passed = bool(investigator.last_validation_result.passed)
+    else:
+        validation_passed = False
+
     exec_source = getattr(rec, "execution_source", getattr(investigator, "last_execution_source", "FALLBACK"))
+    reasoning_prov = getattr(rec, "reasoning_provider", getattr(investigator, "last_reasoning_provider", exec_source))
+    model_prov = getattr(rec, "model_provider", getattr(investigator, "last_model_provider", exec_source))
 
     return InvestigatorRunResponse(
         reconciliation_id=rec.id,
@@ -232,5 +243,7 @@ def run_investigator(
         validation_passed=validation_passed,
         final_status=rec.match_status,
         explanation=rec.notes,
+        reasoning_provider=reasoning_prov,
+        model_provider=model_prov,
         execution_source=exec_source,
     )

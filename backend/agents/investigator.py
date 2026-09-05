@@ -28,12 +28,17 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _sanitize_log_text(text: str) -> str:
+def _sanitize_log_text(text: str, secret_key: Optional[str] = None) -> str:
     """Mask secrets, keys, and tokens from log messages and exception strings."""
     if not text:
         return ""
+    s = str(text)
+    if secret_key and str(secret_key).strip():
+        raw_key = str(secret_key).strip()
+        if len(raw_key) >= 6:
+            s = s.replace(raw_key, "sk-********")
     # Mask OpenAI sk- keys
-    s = re.sub(r"sk-[a-zA-Z0-9_\-\.]{12,}", "sk-********", str(text))
+    s = re.sub(r"sk-[a-zA-Z0-9_\-\.]{12,}", "sk-********", s)
     # Mask Bearer tokens
     s = re.sub(r"(bearer\s+)[a-zA-Z0-9_\-\.]{8,}", r"\1********", s, flags=re.IGNORECASE)
     # Mask auth headers / tokens / secret values
@@ -79,7 +84,10 @@ class InvestigatorAgent:
         self.provider = "openai"
         self.model = "gpt-4o-mini"
         self.last_execution_source: str = "FALLBACK"
+        self.last_reasoning_provider: str = "FALLBACK"
+        self.last_model_provider: str = "FALLBACK"
         self.last_telemetry: Dict[str, Any] = {}
+        self.last_validation_result: Optional[EvidenceValidationResult] = None
 
     def investigate_payment(self, payment: Payment) -> ReconciliationRecord:
         """
@@ -112,6 +120,7 @@ class InvestigatorAgent:
             payment=payment,
             evidence_records=evidence_records,
         )
+        self.last_validation_result = validation_result
 
         # 5. Confidence Routing (PRD Section 14)
         route, final_status, route_note = apply_confidence_routing(
@@ -154,6 +163,11 @@ class InvestigatorAgent:
         rec.scenario_type = payment.scenario_type
         rec.notes = f"[{explanation_payload.candidate_cause.upper()}] {explanation_payload.explanation} ({route_note})"
         rec.execution_source = self.last_execution_source
+        rec.reasoning_provider = self.last_reasoning_provider
+        rec.model_provider = self.last_model_provider
+        rec.validation_passed = validation_result.passed
+        rec.validation_result = validation_result
+        rec.evidence_citations = explanation_payload.evidence_citations
 
         self.session.flush()
 
@@ -181,6 +195,8 @@ class InvestigatorAgent:
                 "amount": float(payment.amount),
                 "candidates_count": len(evidence_pkg.candidate_settlements),
                 "provider": self.last_telemetry.get("provider", self.provider),
+                "reasoning_provider": self.last_reasoning_provider,
+                "model_provider": self.last_model_provider,
                 "model": self.last_telemetry.get("model", self.model),
                 "api_key_detected": self.last_telemetry.get("api_key_detected", False),
             },
@@ -190,6 +206,8 @@ class InvestigatorAgent:
                 "confidence": explanation_payload.confidence,
                 "explanation": explanation_payload.explanation,
                 "execution_source": self.last_execution_source,
+                "reasoning_provider": self.last_reasoning_provider,
+                "model_provider": self.last_model_provider,
                 "telemetry": self.last_telemetry,
             },
             evidence_refs=explanation_payload.evidence_citations,
@@ -239,7 +257,11 @@ class InvestigatorAgent:
         """
         evidence_pkg = self.evidence_service.collect_evidence(payment)
         raw = self._run_reasoning_step(payment, evidence_pkg)
-        return validate_agent_explanation(raw, default_source=self.last_execution_source)
+        payload = validate_agent_explanation(raw, default_source=self.last_execution_source)
+        payload.reasoning_provider = self.last_reasoning_provider
+        payload.model_provider = self.last_model_provider
+        payload.execution_source = self.last_execution_source
+        return payload
 
     def _run_reasoning_step(self, payment: Payment, evidence: EvidencePackage) -> Dict[str, Any]:
         """
@@ -250,15 +272,19 @@ class InvestigatorAgent:
 
         if not api_key_detected:
             telemetry_no_key = {
-                "provider": self.provider,
+                "provider": "fallback",
                 "model": self.model,
                 "api_key_detected": False,
                 "call_started": False,
                 "call_succeeded": False,
                 "call_failed": False,
                 "fallback_activated": True,
+                "reasoning_provider": "FALLBACK",
+                "model_provider": "FALLBACK",
             }
             self.last_execution_source = "FALLBACK"
+            self.last_reasoning_provider = "FALLBACK"
+            self.last_model_provider = "FALLBACK"
             self.last_telemetry = telemetry_no_key
             logger.info(
                 "OpenAI call skipped (API key not detected); fallback activated: %s",
@@ -267,17 +293,21 @@ class InvestigatorAgent:
             )
             raw = self._structured_evidence_reasoning(payment, evidence)
             raw["execution_source"] = "FALLBACK"
+            raw["reasoning_provider"] = "FALLBACK"
+            raw["model_provider"] = "FALLBACK"
             return raw
 
         # API key detected: attempt OpenAI call with telemetry
         telemetry_start = {
-            "provider": self.provider,
+            "provider": "openai",
             "model": self.model,
             "api_key_detected": True,
             "call_started": True,
             "call_succeeded": False,
             "call_failed": False,
             "fallback_activated": False,
+            "reasoning_provider": "OPENAI",
+            "model_provider": "OPENAI",
         }
         logger.info(
             "OpenAI call started: %s",
@@ -322,15 +352,19 @@ class InvestigatorAgent:
                 raise ValueError("OpenAI response payload missing required investigation fields.")
 
             telemetry_success = {
-                "provider": self.provider,
+                "provider": "openai",
                 "model": self.model,
                 "api_key_detected": True,
                 "call_started": True,
                 "call_succeeded": True,
                 "call_failed": False,
                 "fallback_activated": False,
+                "reasoning_provider": "OPENAI",
+                "model_provider": "OPENAI",
             }
             self.last_execution_source = "OPENAI"
+            self.last_reasoning_provider = "OPENAI"
+            self.last_model_provider = "OPENAI"
             self.last_telemetry = telemetry_success
             logger.info(
                 "OpenAI call succeeded: %s",
@@ -338,13 +372,16 @@ class InvestigatorAgent:
                 extra=telemetry_success,
             )
             parsed["execution_source"] = "OPENAI"
+            parsed["reasoning_provider"] = "OPENAI"
+            parsed["model_provider"] = "OPENAI"
             return parsed
 
         except Exception as e:
             err_type = type(e).__name__
-            safe_err = _sanitize_log_text(str(e))
+            safe_err = _sanitize_log_text(str(e), self.api_key)
             telemetry_fail = {
-                "provider": self.provider,
+                "provider": "fallback",
+                "attempted_provider": "openai",
                 "model": self.model,
                 "api_key_detected": True,
                 "call_started": True,
@@ -353,8 +390,12 @@ class InvestigatorAgent:
                 "error_type": err_type,
                 "error_message": safe_err,
                 "fallback_activated": True,
+                "reasoning_provider": "FALLBACK",
+                "model_provider": "FALLBACK",
             }
             self.last_execution_source = "FALLBACK"
+            self.last_reasoning_provider = "FALLBACK"
+            self.last_model_provider = "FALLBACK"
             self.last_telemetry = telemetry_fail
             logger.warning(
                 "OpenAI call failed (%s: %s); fallback activated: %s",
@@ -365,6 +406,8 @@ class InvestigatorAgent:
             )
             raw = self._structured_evidence_reasoning(payment, evidence)
             raw["execution_source"] = "FALLBACK"
+            raw["reasoning_provider"] = "FALLBACK"
+            raw["model_provider"] = "FALLBACK"
             return raw
 
         return self._structured_evidence_reasoning(payment, evidence)

@@ -1,3 +1,48 @@
+### 2026-09-05 14:05
+**Change:** Completed observability, reasoning_provider metadata, validation decoupling, and test suite for Finance Controller Stage 2 Investigator.
+
+**Reason:** Ensure complete observability of OpenAI vs Fallback execution without leaking secrets, decouple validation reporting from match status, add reasoning_provider / model_provider metadata, and verify end-to-end with real and mocked test runs.
+
+**Files changed:**
+- `backend/agents/investigator.py`
+- `backend/agents/output_validator.py`
+- `backend/schemas/investigation.py`
+- `backend/api/reconciliation.py`
+- `tests/integration/test_investigation.py`
+
+**Implementation:**
+- Enhanced `_sanitize_log_text()` in `backend/agents/investigator.py` to mask configured API keys, `sk-` tokens, and Authorization headers across log strings and exception payloads.
+- Added `reasoning_provider` and `model_provider` fields to `CandidateExplanationPayload`, `InvestigatorAgent` state, `ReconciliationRecord`, `AuditLog`, and `InvestigatorRunResponse` API schema.
+- Structured logging captures `provider`, `attempted_provider`, `model`, `api_key_detected` (boolean only), `call_started`, `call_succeeded`, `call_failed`, and `fallback_activated`.
+- Decoupled `validation_passed` in `run_investigator` endpoint from `match_status`: directly preserves `rec.validation_passed` and `investigator.last_validation_result.passed`.
+- Added tests in `tests/integration/test_investigation.py` covering:
+  1. OpenAI success path -> `reasoning_provider: OPENAI`.
+  2. OpenAI failure fallback -> `reasoning_provider: FALLBACK`.
+  3. Validation pass correctly returned even when status is `NEEDS_HUMAN_REVIEW` due to confidence.
+  4. Validation failure correctly reported when evidence checks fail.
+  5. Human-review/exception routing and override workflow.
+
+**Integration changes:**
+- API response for `POST /api/v1/investigator/run` includes `reasoning_provider`, `model_provider`, `execution_source`, and accurate `validation_passed`.
+
+**Tests / verification:**
+- `python -m unittest discover -s tests -v` — 45/45 PASS (0 failures, 0 errors).
+- Real runtime test with payment `21787d67-f578-4e86-b26f-d91d1b4e03a2` (`pay_b40f13a558cc45`):
+  HTTP 200 OK, `reconciliation_id: a13c75bf-9e0a-4933-8fd2-18e78b18838a`, `verdict: RESOLVED_AFTER_INVESTIGATION`, `validation_passed: True`, `reasoning_provider: FALLBACK`. Safe structured log emitted.
+
+**Current status:**
+- InvestigatorAgent — RUNTIME VERIFIED
+- Evidence Validation & Gating — RUNTIME VERIFIED
+- Reconciliation API — RUNTIME VERIFIED
+
+**Remaining work:**
+- Live OpenAI external credit top-up if live production OpenAI LLM calls are desired.
+
+**Blockers / risks:**
+- External OpenAI account quota exhausted (429); fallback handles all reconciliation deterministically.
+
+---
+
 ### 2026-09-05 13:50
 **Change:** Add observable, secret-safe OpenAI telemetry and execution tracking to InvestigatorAgent
 

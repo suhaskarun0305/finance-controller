@@ -38,6 +38,14 @@ class InvestigatorRunResponse(BaseModel):
     validation_passed: bool
     final_status: str
     explanation: Optional[str] = None
+    reasoning_provider: str = Field(
+        default="FALLBACK",
+        description="Source of investigation reasoning: 'OPENAI' or 'FALLBACK'",
+    )
+    model_provider: str = Field(
+        default="FALLBACK",
+        description="Alias for reasoning_provider: 'OPENAI' or 'FALLBACK'",
+    )
     execution_source: str = Field(
         default="FALLBACK",
         description="Investigation execution path: 'OPENAI' or 'FALLBACK'",

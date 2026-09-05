@@ -130,10 +130,16 @@ class TestInvestigationIntegration(unittest.TestCase):
 
             rec = agent.investigate_payment(self.pay)
 
-            # Assert OpenAI path was recorded
+            # Assert OpenAI path and provider telemetry were recorded
             self.assertEqual(rec.execution_source, "OPENAI")
+            self.assertEqual(rec.reasoning_provider, "OPENAI")
+            self.assertEqual(rec.model_provider, "OPENAI")
             self.assertEqual(agent.last_execution_source, "OPENAI")
+            self.assertEqual(agent.last_reasoning_provider, "OPENAI")
+            self.assertEqual(agent.last_model_provider, "OPENAI")
             self.assertEqual(agent.last_telemetry["provider"], "openai")
+            self.assertEqual(agent.last_telemetry["reasoning_provider"], "OPENAI")
+            self.assertEqual(agent.last_telemetry["model_provider"], "OPENAI")
             self.assertEqual(agent.last_telemetry["model"], "gpt-4o-mini")
             self.assertTrue(agent.last_telemetry["api_key_detected"])
             self.assertTrue(agent.last_telemetry["call_started"])
@@ -156,6 +162,8 @@ class TestInvestigationIntegration(unittest.TestCase):
             self.assertIsNotNone(audit_entry)
             audit_details = json.loads(audit_entry.details)
             self.assertEqual(audit_details["output_snapshot"].get("execution_source"), "OPENAI")
+            self.assertEqual(audit_details["output_snapshot"].get("reasoning_provider"), "OPENAI")
+            self.assertEqual(audit_details["output_snapshot"].get("model_provider"), "OPENAI")
             self.assertNotIn(test_key, audit_entry.details)
 
     def test_investigator_openai_failure_activates_fallback(self):
@@ -172,10 +180,17 @@ class TestInvestigationIntegration(unittest.TestCase):
 
             rec = agent.investigate_payment(self.pay)
 
-            # Assert graceful fallback was recorded
+            # Assert graceful fallback was recorded with proper provider
             self.assertEqual(rec.execution_source, "FALLBACK")
+            self.assertEqual(rec.reasoning_provider, "FALLBACK")
+            self.assertEqual(rec.model_provider, "FALLBACK")
             self.assertEqual(agent.last_execution_source, "FALLBACK")
-            self.assertEqual(agent.last_telemetry["provider"], "openai")
+            self.assertEqual(agent.last_reasoning_provider, "FALLBACK")
+            self.assertEqual(agent.last_model_provider, "FALLBACK")
+            self.assertEqual(agent.last_telemetry["provider"], "fallback")
+            self.assertEqual(agent.last_telemetry["attempted_provider"], "openai")
+            self.assertEqual(agent.last_telemetry["reasoning_provider"], "FALLBACK")
+            self.assertEqual(agent.last_telemetry["model_provider"], "FALLBACK")
             self.assertEqual(agent.last_telemetry["model"], "gpt-4o-mini")
             self.assertTrue(agent.last_telemetry["api_key_detected"])
             self.assertTrue(agent.last_telemetry["call_started"])
@@ -200,6 +215,8 @@ class TestInvestigationIntegration(unittest.TestCase):
             self.assertIsNotNone(audit_entry)
             audit_details = json.loads(audit_entry.details)
             self.assertEqual(audit_details["output_snapshot"].get("execution_source"), "FALLBACK")
+            self.assertEqual(audit_details["output_snapshot"].get("reasoning_provider"), "FALLBACK")
+            self.assertEqual(audit_details["output_snapshot"].get("model_provider"), "FALLBACK")
             self.assertNotIn(test_key, audit_entry.details)
 
     def test_investigator_no_api_key_activates_fallback(self):
@@ -208,11 +225,76 @@ class TestInvestigationIntegration(unittest.TestCase):
         rec = agent.investigate_payment(self.pay)
 
         self.assertEqual(rec.execution_source, "FALLBACK")
+        self.assertEqual(rec.reasoning_provider, "FALLBACK")
+        self.assertEqual(rec.model_provider, "FALLBACK")
         self.assertEqual(agent.last_execution_source, "FALLBACK")
         self.assertFalse(agent.last_telemetry["api_key_detected"])
         self.assertFalse(agent.last_telemetry["call_started"])
         self.assertTrue(agent.last_telemetry["fallback_activated"])
         self.assertEqual(rec.match_status, "RESOLVED_AFTER_INVESTIGATION")
+
+    def test_validation_pass_decoupled_from_match_status(self):
+        """
+        Requirement 6.C: Validation pass is correctly returned even when
+        confidence score routes verdict to NEEDS_HUMAN_REVIEW.
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+
+        # Output with valid citations (passes evidence gater) but moderate confidence 0.80
+        mock_payload = json.dumps({
+            "candidate_cause": "name_mismatch",
+            "explanation": "Payer partially matches customer with moderate confidence.",
+            "evidence_citations": ["inv_001", "stl_001"],
+            "confidence": 0.80,  # Below 0.90 threshold -> routes to NEEDS_HUMAN_REVIEW
+            "linked_invoice_id": "inv_001",
+            "linked_settlement_id": "stl_001",
+        })
+
+        agent = InvestigatorAgent(self.session, api_key="sk-test-key-1234567890abcdef")
+        with patch("openai.OpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_comp = MagicMock()
+            mock_comp.choices = [MagicMock(message=MagicMock(content=mock_payload))]
+            mock_client.chat.completions.create.return_value = mock_comp
+
+            rec = agent.investigate_payment(self.pay)
+
+            # Validation passed, yet status is NEEDS_HUMAN_REVIEW due to confidence
+            self.assertTrue(rec.validation_passed)
+            self.assertEqual(rec.match_status, "NEEDS_HUMAN_REVIEW")
+
+    def test_validation_failure_correctly_reported(self):
+        """
+        Requirement 6.D: Validation failure is correctly returned when
+        evidence citations are invalid or checks fail.
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+
+        # Output citing a non-existent invoice ID
+        mock_payload = json.dumps({
+            "candidate_cause": "name_mismatch",
+            "explanation": "Citing fake evidence that will fail existence gating.",
+            "evidence_citations": ["inv_nonexistent_99999"],
+            "confidence": 0.99,
+            "linked_invoice_id": "inv_nonexistent_99999",
+        })
+
+        agent = InvestigatorAgent(self.session, api_key="sk-test-key-1234567890abcdef")
+        with patch("openai.OpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_comp = MagicMock()
+            mock_comp.choices = [MagicMock(message=MagicMock(content=mock_payload))]
+            mock_client.chat.completions.create.return_value = mock_comp
+
+            rec = agent.investigate_payment(self.pay)
+
+            # Validation must fail and status downgraded
+            self.assertFalse(rec.validation_passed)
+            self.assertEqual(rec.match_status, "NEEDS_HUMAN_REVIEW")
 
 
 class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
@@ -314,6 +396,8 @@ class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
             data = resp.json()
             self.assertEqual(data["reconciliation_id"], s1_rec.id)
             self.assertEqual(data["execution_source"], "OPENAI")
+            self.assertEqual(data["reasoning_provider"], "OPENAI")
+            self.assertEqual(data["model_provider"], "OPENAI")
             self.assertEqual(data["verdict"], "RESOLVED_AFTER_INVESTIGATION")
             self.assertTrue(data["validation_passed"])
             self.assertEqual(data["confidence"], 0.98)
@@ -345,38 +429,147 @@ class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
             data = resp.json()
             self.assertEqual(data["reconciliation_id"], s1_rec.id)
             self.assertEqual(data["execution_source"], "FALLBACK")
+            self.assertEqual(data["reasoning_provider"], "FALLBACK")
+            self.assertEqual(data["model_provider"], "FALLBACK")
             self.assertEqual(data["verdict"], "RESOLVED_AFTER_INVESTIGATION")
             self.assertTrue(data["validation_passed"])
 
+    def test_endpoint_validation_pass_with_human_review_status(self):
+        """
+        Requirement 6.C: Endpoint preserves real validation result (True)
+        even when status is NEEDS_HUMAN_REVIEW.
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+        from backend.reconciliation.matcher import Stage1Matcher
+
+        matcher = Stage1Matcher(self.session)
+        s1_rec = matcher.process_payment(self.pay)
+
+        mock_openai_content = json.dumps({
+            "candidate_cause": "name_mismatch",
+            "explanation": "Valid evidence, but low confidence score triggers human review.",
+            "evidence_citations": ["inv_101", "stl_101"],
+            "confidence": 0.75,
+            "linked_invoice_id": "inv_101",
+            "linked_settlement_id": "stl_101",
+        })
+
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_completion.choices = [
+                MagicMock(message=MagicMock(content=mock_openai_content))
+            ]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            resp = self.client.post(
+                "/api/v1/investigator/run",
+                json={"payment_id": "pay_dc3111edc78c45"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            # Crucial assertion: validation_passed is True, verdict is NEEDS_HUMAN_REVIEW
+            self.assertTrue(data["validation_passed"])
+            self.assertEqual(data["verdict"], "NEEDS_HUMAN_REVIEW")
+            self.assertEqual(data["final_status"], "NEEDS_HUMAN_REVIEW")
+            self.assertEqual(data["execution_source"], "OPENAI")
+            self.assertEqual(data["reasoning_provider"], "OPENAI")
+
+    def test_endpoint_validation_failure_reported(self):
+        """
+        Requirement 6.D: Endpoint returns validation_passed: False when gating checks fail.
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+        from backend.reconciliation.matcher import Stage1Matcher
+
+        matcher = Stage1Matcher(self.session)
+        s1_rec = matcher.process_payment(self.pay)
+
+        # Cite non-existent invoice
+        mock_openai_content = json.dumps({
+            "candidate_cause": "name_mismatch",
+            "explanation": "Invalid citation to trigger validation failure.",
+            "evidence_citations": ["inv_bad_id_999"],
+            "confidence": 0.95,
+            "linked_invoice_id": "inv_bad_id_999",
+        })
+
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_completion.choices = [
+                MagicMock(message=MagicMock(content=mock_openai_content))
+            ]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            resp = self.client.post(
+                "/api/v1/investigator/run",
+                json={"payment_id": "pay_dc3111edc78c45"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertFalse(data["validation_passed"])
+            self.assertEqual(data["verdict"], "NEEDS_HUMAN_REVIEW")
+
     def test_endpoint_contract_with_reconciliation_id(self):
+        from unittest.mock import patch
         from backend.reconciliation.matcher import Stage1Matcher
         matcher = Stage1Matcher(self.session)
         s1_rec = matcher.process_payment(self.pay)
 
-        resp = self.client.post(
-            "/api/v1/investigator/run",
-            json={"reconciliation_id": s1_rec.id},
-        )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["reconciliation_id"], s1_rec.id)
-        self.assertIn(data["verdict"], ["RESOLVED_AFTER_INVESTIGATION", "NEEDS_HUMAN_REVIEW", "EXCEPTION"])
+        with patch.object(InvestigatorAgent, "_run_reasoning_step", side_effect=lambda p, e: {
+            "candidate_cause": "name_mismatch",
+            "explanation": "Deterministic test fallback",
+            "evidence_citations": ["inv_101", "stl_101"],
+            "confidence": 0.95,
+            "linked_invoice_id": "inv_101",
+            "linked_settlement_id": "stl_101",
+            "execution_source": "FALLBACK",
+            "reasoning_provider": "FALLBACK",
+            "model_provider": "FALLBACK",
+        }):
+            resp = self.client.post(
+                "/api/v1/investigator/run",
+                json={"reconciliation_id": s1_rec.id},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["reconciliation_id"], s1_rec.id)
+            self.assertEqual(data["reasoning_provider"], "FALLBACK")
+            self.assertEqual(data["model_provider"], "FALLBACK")
+            self.assertEqual(data["execution_source"], "FALLBACK")
 
     def test_endpoint_contract_with_both_ids(self):
+        from unittest.mock import patch
         from backend.reconciliation.matcher import Stage1Matcher
         matcher = Stage1Matcher(self.session)
         s1_rec = matcher.process_payment(self.pay)
 
-        resp = self.client.post(
-            "/api/v1/investigator/run",
-            json={
-                "reconciliation_id": s1_rec.id,
-                "payment_id": "pay_dc3111edc78c45",
-            },
-        )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["reconciliation_id"], s1_rec.id)
+        with patch.object(InvestigatorAgent, "_run_reasoning_step", side_effect=lambda p, e: {
+            "candidate_cause": "name_mismatch",
+            "explanation": "Deterministic test fallback",
+            "evidence_citations": ["inv_101", "stl_101"],
+            "confidence": 0.95,
+            "linked_invoice_id": "inv_101",
+            "linked_settlement_id": "stl_101",
+            "execution_source": "FALLBACK",
+            "reasoning_provider": "FALLBACK",
+            "model_provider": "FALLBACK",
+        }):
+            resp = self.client.post(
+                "/api/v1/investigator/run",
+                json={
+                    "reconciliation_id": s1_rec.id,
+                    "payment_id": "pay_dc3111edc78c45",
+                },
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["reconciliation_id"], s1_rec.id)
 
     def test_endpoint_invalid_ids(self):
         resp = self.client.post("/api/v1/investigator/run", json={"payment_id": "invalid_xyz"})
@@ -393,3 +586,4 @@ class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
