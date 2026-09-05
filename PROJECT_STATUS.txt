@@ -1,69 +1,96 @@
 # Project Status
 
 ## Last verified
-2026-09-05 14:15 IST
+2026-09-05 14:35 IST
 
 ## Overall status
-Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational and runtime-verified on port 8001 using seeded synthetic Razorpay-shaped data, with observable and secret-safe OpenAI telemetry, explicit `reasoning_provider` tracking, decoupled validation reporting, and deterministic local fallback. External Razorpay APIs/webhooks are not connected.
+Finance Controller Stage 1 (Deterministic Reconciliation) & Stage 2 (AI Investigation) are RUNTIME VERIFIED and live on port 8001 against Neon Cloud PostgreSQL (with local SQLite fallback). The Vanilla JS/CSS dashboard is live and interactive. OpenAI integration has secret-safe observable telemetry and deterministic fallback active (account quota exhausted externally). External Razorpay APIs/webhooks and API authentication are not started.
 
-## Completed
-- Verified FastAPI application running locally on port 8001 with CORS support.
-- Verified `/health/db` returns connected status on `http://127.0.0.1:8001/health/db`.
-- Verified `GET /api/v1/payments` returns 199 seeded synthetic payment records.
-- Verified `POST /api/v1/investigator/run` accepts both `reconciliation_id` and `payment_id` (UUID and `razorpay_payment_id`).
-- Implemented structured logging around OpenAI calls with secret sanitization (no keys or tokens leaked).
-- Implemented observable telemetry, `reasoning_provider`, `model_provider`, and `execution_source` (`OPENAI` | `FALLBACK`) across API response schema, models, and audit logs.
-- Fixed validation reporting: real `EvidenceValidationResult.passed` is preserved and returned independently of `match_status`.
-- Added comprehensive unit and integration tests verifying OpenAI mocked success, failure fallback, validation pass/fail decoupling, and human review routing.
-- Verified all 45 test cases pass in `tests/`.
-- Verified live end-to-end execution on real payment `21787d67-f578-4e86-b26f-d91d1b4e03a2`.
-- Removed accidental root-level `Get-Content` artifact.
+## Completed and verified
+- Backend Application: FastAPI running locally on port 8001 (`http://127.0.0.1:8001`) with all API routers mounted and functional.
+- Frontend Dashboard: Vanilla JS + CSS dashboard in `backend/static/` served at `/` and `/dashboard`, rendering live KPIs, ledger, drawer trace, human review queue, and override modal.
+- Database: Neon Cloud PostgreSQL connected (`postgresql+psycopg2`), healthy (`/health/db` returns 200), seeded with 199 payments, 179 settlements, and 199 reconciliation records.
+- Core Reconciliation APIs:
+  - `GET /health/db` — 200 OK
+  - `GET /api/v1/payments` — 200 OK (199 seeded synthetic records)
+  - `GET /api/v1/settlements` — 200 OK
+  - `GET /api/v1/reconciliation/records` — 200 OK
+  - `POST /api/v1/reconciliation/run` — 200 OK (single payment and batch mode)
+  - `GET /api/v1/candidates/{payment_id}` — 200 OK
+  - `POST /api/v1/investigator/run` — 200 OK (accepts payment_id and reconciliation_id, returns reasoning_provider and decoupled validation)
+  - `GET /api/v1/review/queue` — 200 OK (returns prioritized exception cases)
+  - `POST /api/v1/review/{reconciliation_id}/decide` — 200 OK (ACCEPT, OVERRIDE, REQUEST_MORE_EVIDENCE)
+  - `GET /api/v1/exceptions` — 200 OK
+  - `GET /api/v1/metrics/summary` — 200 OK
+  - `GET /api/v1/dashboard/metrics-panel` — 200 OK
+  - `GET /api/v1/evaluation/report` — 200 OK
+- AI Investigation Engine: Stage 2 InvestigatorAgent with 5 gating checks (existence, ownership, amount math, temporal window, idempotence), confidence routing, and immutable audit logs.
+- Secret Sanitization: Regex masking for API keys, tokens, and Authorization headers in logs and responses.
+- Test Suite: 45/45 tests passing (25 unit, 17 integration, 3 evaluation) in 7.2s.
+- Git State: Clean working tree on `main`, up to date with remote, `.env` git-ignored and never committed.
 
-## In progress
-- Monitoring live reconciliation exceptions and human review workflows.
+## Implemented but not verified
+- PostgreSQL Container in Docker Compose: `docker-compose.yml` defines `postgres:16-alpine`, but Docker daemon is inactive on host and application connects directly to remote Neon PostgreSQL.
+- Dual-database local SQLite fallback: Code logic exists in `backend.config.settings` and `backend.database.connection`, but active runtime database is Neon PostgreSQL.
 
 ## Remaining work
-- [ ] Add OpenAI billing credits externally if live production inference is required.
+- [ ] Implement API authentication & authorization (JWT / API Key / RBAC) for all `/api/v1/` endpoints.
+- [ ] Restrict CORS origins from wildcard `*` to approved frontend origins.
+- [ ] Add rate limiting on computationally intensive endpoints (`/api/v1/investigator/run`, `/api/v1/reconciliation/run`).
+- [ ] Implement Dockerfile and full containerization for FastAPI application.
+- [ ] Set up Alembic database migrations to replace raw `Base.metadata.create_all()`.
+- [ ] Implement Next.js frontend in `frontend/` if a dedicated framework application is required beyond the static dashboard.
 - [ ] Implement external Razorpay Payments API client (`api.razorpay.com/v1/payments`) if live synchronization is desired.
 - [ ] Implement external Razorpay Settlements API client (`api.razorpay.com/v1/settlements`) if automated settlement fetching is desired.
-- [ ] Implement Razorpay webhook receiver endpoint with HMAC SHA-256 signature verification if real-time ingestion is desired.
+- [ ] Implement Razorpay webhook receiver endpoint with HMAC-SHA256 signature verification if real-time ingestion is desired.
 
 ## Human / external work
-- [ ] Add OpenAI credits to organization billing at https://platform.openai.com/settings/organization/billing/ (current account balance is exhausted).
-- [ ] Provide Razorpay API Key ID, Key Secret, and Webhook Secret if live Razorpay platform integration is planned.
+- [ ] Top up OpenAI account credits at https://platform.openai.com/settings/organization/billing/ (current account balance is exhausted with HTTP 429).
+- [ ] Provide Razorpay Key ID, Key Secret, and Webhook Secret if live platform synchronization is required.
 
-## Integrations
-| Component | Code | Configured | Connected | Runtime Verified | Production Verified | Notes |
-|---|---|---|---|---|---|---|
-| OpenAI | ✅ | ✅ | ⚠️ | ✅ | ❌ | Code implemented; key configured in `.env`; live call attempted (returns 429 quota exhausted); deterministic fallback active & runtime verified. |
-| Razorpay Payments | ❌ | ❌ | ❌ | ❌ | ❌ | **Synthetic data only.** 199 seeded payments with Razorpay schemas (`razorpay_payment_id`). No external API client or credentials. |
-| Razorpay Settlements | ❌ | ❌ | ❌ | ❌ | ❌ | **Synthetic data only.** Seeded settlements and standard fee schedules loaded locally in SQLite. No external API client or credentials. |
-| Razorpay Webhooks | ❌ | ❌ | ❌ | ❌ | ❌ | Not implemented. No webhook receiver endpoints or signature validation logic in codebase. |
-| Database | ✅ | ✅ | ✅ | ✅ | ❌ | SQLite file connected (`finance_controller.db`), healthy, all tables seeded; PostgreSQL dual-compatible via SQLAlchemy. |
-| Deployment | ✅ | ✅ | ✅ | ✅ | ❌ | Local Uvicorn server running on `http://127.0.0.1:8001` with reload enabled. |
+## Comprehensive Component Classification Matrix
+| Component | Classification | Evidence & Runtime Notes |
+|---|---|---|
+| Backend | RUNTIME VERIFIED | FastAPI app running on port 8001; Stage 1 matcher, Stage 2 investigator, services, and schemas verified. |
+| Frontend (Static Dashboard) | RUNTIME VERIFIED | Vanilla JS + CSS dashboard in `backend/static/` served at `http://127.0.0.1:8001/`, fully interactive with live data. |
+| Frontend (Next.js in `frontend/`) | NOT STARTED | `frontend/app/page.tsx` is 0 bytes; no `package.json`, build pipeline, or node dependencies. |
+| Database | RUNTIME VERIFIED | Neon Cloud PostgreSQL active and connected (`/health/db` = healthy, 199 payments, 179 settlements). Dual-engine SQLite fallback implemented. |
+| APIs | RUNTIME VERIFIED | All 13 core REST endpoints tested live via HTTP and returning 200 OK. |
+| OpenAI Integration | RUNTIME VERIFIED (Fallback) | Code implemented, key configured in `.env`, live call attempted (returns 429 quota exhausted), deterministic fallback active & verified. |
+| Razorpay (Synthetic Data) | RUNTIME VERIFIED | 199 seeded records with Razorpay IDs (`pay_...`, `setl_...`) in active PostgreSQL database. |
+| Razorpay (Payments API) | NOT STARTED | No HTTP client, no live requests to `api.razorpay.com/v1/payments`, no credentials configured. |
+| Razorpay (Settlements API) | NOT STARTED | No HTTP client, no live requests to `api.razorpay.com/v1/settlements`, no credentials configured. |
+| Razorpay (Webhooks) | NOT STARTED | No webhook receiver endpoint, no HMAC-SHA256 signature verification logic. |
+| Human Review Workflow | RUNTIME VERIFIED | Queue sorted by risk/age, decision endpoints (ACCEPT/OVERRIDE), audit logging, and UI modal verified. |
+| Authentication & Authorization | NOT STARTED | Zero authentication, JWT, or RBAC guards across all endpoints; arbitrary `reviewer_id` accepted. |
+| CORS | CONFIGURED | Wildcard `allow_origins=["*"]` with `allow_credentials=True` active in `backend/main.py`. Security risk. |
+| Secrets & Configuration | RUNTIME VERIFIED | Loaded via `python-dotenv` from `.env`; secret masking active in logs; `.env` is git-ignored and never committed. |
+| Docker & Deployment | CODE IMPLEMENTED (Partial) | `docker-compose.yml` exists for PostgreSQL only; no app Dockerfile; Docker daemon inactive; Uvicorn running directly on host. |
+| Dependencies | RUNTIME VERIFIED | `requirements.txt` contains 7 dependencies; all installed in Python 3.13; no node dependencies. |
+| Tests | RUNTIME VERIFIED | 45 tests passing in 7.2s (25 unit, 17 integration, 3 evaluation). |
+| Git State | RUNTIME VERIFIED | Branch `main`, clean tree, in sync with `origin/main`, no untracked files or exposed secrets. |
+| Documentation | RUNTIME VERIFIED | `README.md`, `PROJECT_STATUS.txt`, `CHANGE_LOG.txt`, and `docs/` aligned to port 8001 and 45 tests. |
 
-## API status
-- `POST /api/v1/investigator/run` active, supporting `payment_id` and/or `reconciliation_id`, returning `reasoning_provider`, `model_provider`, `execution_source`, and decoupled `validation_passed`.
-- CORS middleware active for local web clients and Swagger UI (`http://127.0.0.1:8001/docs`).
-
-## Database status
-- SQLite database (`finance_controller.db`) connected and seeded with 199 payments, customers, invoices, and settlements.
-- Audit log records immutable snapshots including `reasoning_provider`, `execution_source`, and sanitized telemetry.
-
-## Tests
-- 45 passed, 0 failed, 0 errors (`Ran 45 tests in 6.843s - OK`).
-
-## Deployment
-- Uvicorn running on `http://127.0.0.1:8001` with reload enabled.
+## Security Audit & Vulnerabilities
+| Severity | Vulnerability | Description & Impact |
+|---|---|---|
+| CRITICAL | Missing Authentication & Authorization | All endpoints under `/api/v1/` are unauthenticated. Any caller can trigger reconciliation, AI investigation, view financial records, or submit review overrides without credentials or RBAC. |
+| HIGH | Insecure CORS Configuration | `CORSMiddleware` configured with `allow_origins=["*"]` and `allow_credentials=True`. Enables cross-origin websites to make requests against internal APIs. |
+| HIGH | Unrestricted Financial PII Exposure | Endpoints `/api/v1/payments`, `/api/v1/settlements`, and `/api/v1/review/queue` expose customer names, emails, and transaction amounts without auth or rate limits. |
+| MEDIUM | Lack of Rate Limiting | Resource-intensive endpoints (`/api/v1/investigator/run`, `/api/v1/reconciliation/run`) have no rate limiting, creating DoS and resource-exhaustion risk. |
+| MEDIUM | Missing Database Migration Framework | Schema relies entirely on `Base.metadata.create_all()` without Alembic migrations, preventing controlled schema evolution and rollbacks. |
+| MEDIUM | Duplicate `.env` Files | `.env` exists in root and as a duplicate in `backend/.env`. Increases configuration divergence risk. |
+| LOW | Pydantic V1 Deprecation Warnings | Class-based `Config` in schemas produces deprecation warnings on Pydantic 2.x. |
+| LOW | Unclosed Database Connections in Tests | Unit/integration test suites trigger `ResourceWarning: unclosed database in <sqlite3.Connection>` during test teardown. |
 
 ## Blockers and risks
-- External OpenAI account has 0 credits remaining (`credit_balance_exhausted`), causing live inference to activate local structured fallback. System handles this safely without crash or downtime.
+- External OpenAI account credit balance is exhausted (`credit_balance_exhausted` / HTTP 429). The system safely activates local deterministic fallback without crashing.
+- Lack of authentication and wildcard CORS poses a security risk if exposed to public networks.
 
 ## Decisions / assumptions
-- Structured logging uses JSON-formatted dictionaries in `extra` and log string to ensure both structured collectors and stdout log stream capture telemetry.
-- API keys, bearer tokens, and auth headers are automatically sanitized via regex pattern matching before logging.
-- Canonical local dev server runs on port 8001.
+- Canonical server port is 8001 (`http://127.0.0.1:8001`).
+- Active primary database is Neon Cloud PostgreSQL with connection pooling and keepalives; SQLite file remains as local fallback.
+- Vanilla JS dashboard in `backend/static/` is the canonical web UI served directly by FastAPI.
 
 ## Recommended next action
-Top up OpenAI account credits if live model evaluations are required; otherwise continue running with deterministic Stage 2 structured reasoning.
-
+Implement an authentication layer (API key / Bearer token) and restrict CORS origins to secure the exposed financial endpoints.
