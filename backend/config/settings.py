@@ -66,3 +66,10 @@ def get_safe_database_url() -> str:
     # Matches   scheme://user:PASSWORD@host...
     return re.sub(r"(?<=:)[^:@]+(?=@)", "********", DATABASE_URL)
 
+
+# ---------------------------------------------------------------------------
+# LLM / AI Configuration (Stage 2 AI Investigator Agent)
+# ---------------------------------------------------------------------------
+OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY")
+
