@@ -38,6 +38,10 @@ class InvestigatorRunResponse(BaseModel):
     validation_passed: bool
     final_status: str
     explanation: Optional[str] = None
+    execution_source: str = Field(
+        default="FALLBACK",
+        description="Investigation execution path: 'OPENAI' or 'FALLBACK'",
+    )
 
 
 class TimelineStep(BaseModel):

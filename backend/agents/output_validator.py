@@ -50,6 +50,7 @@ class CandidateExplanationPayload:
     discrepancy: float = 0.0
     verdict: str = "NEEDS_HUMAN_REVIEW"
     reason: str = "UNKNOWN"
+    execution_source: str = "FALLBACK"
 
 
 @dataclass
@@ -66,7 +67,10 @@ class EvidenceValidationResult:
     downgrade_reason: Optional[str] = None
 
 
-def validate_agent_explanation(data: Dict[str, Any]) -> CandidateExplanationPayload:
+def validate_agent_explanation(
+    data: Dict[str, Any],
+    default_source: str = "FALLBACK",
+) -> CandidateExplanationPayload:
     """
     Validate and parse structured candidate explanation payload.
     Supports both PRD Section 12.3 JSON schema and existing pipeline structures.
@@ -112,6 +116,10 @@ def validate_agent_explanation(data: Dict[str, Any]) -> CandidateExplanationPayl
     except (ValueError, TypeError):
         confidence = 0.0
 
+    exec_source = str(data.get("execution_source") or default_source).upper().strip()
+    if exec_source not in ("OPENAI", "FALLBACK"):
+        exec_source = default_source
+
     return CandidateExplanationPayload(
         candidate_cause=cause,
         explanation=explanation,
@@ -123,6 +131,7 @@ def validate_agent_explanation(data: Dict[str, Any]) -> CandidateExplanationPayl
         discrepancy=float(data.get("discrepancy", 0.0)),
         verdict=verdict,
         reason=cause.upper(),
+        execution_source=exec_source,
     )
 
 

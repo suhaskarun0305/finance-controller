@@ -1,0 +1,47 @@
+### 2026-09-05 13:50
+**Change:** Add observable, secret-safe OpenAI telemetry and execution tracking to InvestigatorAgent
+
+**Reason:** Make OpenAI Stage 2 investigations fully observable and testable without exposing secrets, while preserving deterministic fallback, gating, confidence routing, and immutable audit trails.
+
+**Files changed:**
+- `backend/agents/investigator.py`
+- `backend/agents/output_validator.py`
+- `backend/schemas/investigation.py`
+- `backend/api/reconciliation.py`
+- `tests/integration/test_investigation.py`
+
+**Implementation:**
+- Added structured logging around OpenAI calls capturing: `provider`, `model`, `api_key_detected` (boolean), `call_started`, `call_succeeded`, `call_failed`, and `fallback_activated`.
+- Added secret sanitization (`_sanitize_log_text`) to mask API keys, tokens, and authorization headers from all log entries, exception strings, and audit payloads.
+- Implemented non-silent exception handling that logs the exception class and safe error message while gracefully activating the deterministic fallback.
+- Added `execution_source` (`OPENAI` vs `FALLBACK`) field across `CandidateExplanationPayload`, `InvestigatorAgent` telemetry, `ReconciliationRecord` in-memory attributes, `AuditLog` step snapshots, and `InvestigatorRunResponse` API schema.
+- Added comprehensive unit and integration tests mocking OpenAI success, OpenAI failure fallback, empty API key fallback, and endpoint responses.
+
+**Integration changes:**
+- Updated `POST /api/v1/investigator/run` schema to include `execution_source` (`OPENAI` | `FALLBACK`).
+- Immutable audit log `output_snapshot` for `AI_INVESTIGATION` now records `execution_source` and safe structured telemetry.
+
+**Tests / verification:**
+- `python -m unittest tests/integration/test_investigation.py -v` — PASS
+  10/10 tests passed in 23.4s, verifying OpenAI mock success, failure fallback, API key masking, and endpoint contracts.
+- `python -m unittest discover -s tests -v` — PASS
+  41/41 tests passed across unit, integration, and evaluation suites.
+- Live HTTP call `POST /api/v1/investigator/run` with `payment_id=pay_dc3111edc78c45` — PASS
+  Verified 200 OK response with `execution_source: "FALLBACK"` and structured log output in uvicorn.
+
+**Current status:**
+- InvestigatorAgent — RUNTIME VERIFIED
+- Reconciliation API — RUNTIME VERIFIED
+- OpenAI Integration — CODE IMPLEMENTED / CONFIGURED (Quota exhausted externally, verified via mock + fallback)
+
+**Remaining work created by this change:**
+- None in core codebase.
+
+**Human / external work:**
+- Add OpenAI credits to organization billing if live production OpenAI completions are desired beyond mock/fallback.
+
+**Blockers / risks:**
+- External OpenAI account credit balance is currently exhausted (HTTP 429 `insufficient_quota`), activating local fallback by design.
+
+**Next action:**
+- Provide credit/billing update on OpenAI if live production LLM calls are needed; otherwise local fallback engine handles all reconciliation scenarios.

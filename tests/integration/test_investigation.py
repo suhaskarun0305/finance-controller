@@ -105,6 +105,115 @@ class TestInvestigationIntegration(unittest.TestCase):
         self.assertEqual(audit_entry.action, "HUMAN_REVIEW")
         self.assertIn("lead-specialist", audit_entry.actor)
 
+    def test_investigator_openai_success_path(self):
+        import json
+        from unittest.mock import patch, MagicMock
+
+        mock_payload = json.dumps({
+            "candidate_cause": "name_mismatch",
+            "explanation": "Payer ACME TECHNOLOGIES PVT LTD matches invoice customer Acme Tech via fuzzy matching.",
+            "evidence_citations": ["inv_001", "stl_001"],
+            "confidence": 0.98,
+            "linked_invoice_id": "inv_001",
+            "linked_settlement_id": "stl_001",
+        })
+
+        test_key = "sk-mock-key-1234567890abcdef"
+        agent = InvestigatorAgent(self.session, api_key=test_key)
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_comp = MagicMock()
+            mock_comp.choices = [MagicMock(message=MagicMock(content=mock_payload))]
+            mock_client.chat.completions.create.return_value = mock_comp
+
+            rec = agent.investigate_payment(self.pay)
+
+            # Assert OpenAI path was recorded
+            self.assertEqual(rec.execution_source, "OPENAI")
+            self.assertEqual(agent.last_execution_source, "OPENAI")
+            self.assertEqual(agent.last_telemetry["provider"], "openai")
+            self.assertEqual(agent.last_telemetry["model"], "gpt-4o-mini")
+            self.assertTrue(agent.last_telemetry["api_key_detected"])
+            self.assertTrue(agent.last_telemetry["call_started"])
+            self.assertTrue(agent.last_telemetry["call_succeeded"])
+            self.assertFalse(agent.last_telemetry["call_failed"])
+            self.assertFalse(agent.last_telemetry["fallback_activated"])
+
+            # Verify API key is NOT leaked anywhere in telemetry
+            telemetry_str = json.dumps(agent.last_telemetry)
+            self.assertNotIn(test_key, telemetry_str)
+
+            # Verify verdict and audit log
+            self.assertEqual(rec.match_status, "RESOLVED_AFTER_INVESTIGATION")
+            audit_entry = self.session.scalars(
+                select(AuditLog).where(
+                    AuditLog.entity_id == rec.id,
+                    AuditLog.action == "AI_INVESTIGATION",
+                )
+            ).first()
+            self.assertIsNotNone(audit_entry)
+            audit_details = json.loads(audit_entry.details)
+            self.assertEqual(audit_details["output_snapshot"].get("execution_source"), "OPENAI")
+            self.assertNotIn(test_key, audit_entry.details)
+
+    def test_investigator_openai_failure_activates_fallback(self):
+        import json
+        from unittest.mock import patch, MagicMock
+
+        test_key = "sk-mock-key-1234567890abcdef"
+        agent = InvestigatorAgent(self.session, api_key=test_key)
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = RuntimeError("Simulated OpenAI rate limit or timeout")
+
+            rec = agent.investigate_payment(self.pay)
+
+            # Assert graceful fallback was recorded
+            self.assertEqual(rec.execution_source, "FALLBACK")
+            self.assertEqual(agent.last_execution_source, "FALLBACK")
+            self.assertEqual(agent.last_telemetry["provider"], "openai")
+            self.assertEqual(agent.last_telemetry["model"], "gpt-4o-mini")
+            self.assertTrue(agent.last_telemetry["api_key_detected"])
+            self.assertTrue(agent.last_telemetry["call_started"])
+            self.assertFalse(agent.last_telemetry["call_succeeded"])
+            self.assertTrue(agent.last_telemetry["call_failed"])
+            self.assertTrue(agent.last_telemetry["fallback_activated"])
+            self.assertEqual(agent.last_telemetry["error_type"], "RuntimeError")
+            self.assertIn("Simulated OpenAI rate limit", agent.last_telemetry["error_message"])
+
+            # Verify API key is NOT leaked anywhere in telemetry
+            telemetry_str = json.dumps(agent.last_telemetry)
+            self.assertNotIn(test_key, telemetry_str)
+
+            # Business verdict preserved via fallback
+            self.assertEqual(rec.match_status, "RESOLVED_AFTER_INVESTIGATION")
+            audit_entry = self.session.scalars(
+                select(AuditLog).where(
+                    AuditLog.entity_id == rec.id,
+                    AuditLog.action == "AI_INVESTIGATION",
+                )
+            ).first()
+            self.assertIsNotNone(audit_entry)
+            audit_details = json.loads(audit_entry.details)
+            self.assertEqual(audit_details["output_snapshot"].get("execution_source"), "FALLBACK")
+            self.assertNotIn(test_key, audit_entry.details)
+
+    def test_investigator_no_api_key_activates_fallback(self):
+        agent = InvestigatorAgent(self.session, api_key="")
+        agent.api_key = ""  # Explicitly empty
+        rec = agent.investigate_payment(self.pay)
+
+        self.assertEqual(rec.execution_source, "FALLBACK")
+        self.assertEqual(agent.last_execution_source, "FALLBACK")
+        self.assertFalse(agent.last_telemetry["api_key_detected"])
+        self.assertFalse(agent.last_telemetry["call_started"])
+        self.assertTrue(agent.last_telemetry["fallback_activated"])
+        self.assertEqual(rec.match_status, "RESOLVED_AFTER_INVESTIGATION")
+
 
 class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
     """
@@ -204,6 +313,7 @@ class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             data = resp.json()
             self.assertEqual(data["reconciliation_id"], s1_rec.id)
+            self.assertEqual(data["execution_source"], "OPENAI")
             self.assertEqual(data["verdict"], "RESOLVED_AFTER_INVESTIGATION")
             self.assertTrue(data["validation_passed"])
             self.assertEqual(data["confidence"], 0.98)
@@ -214,6 +324,29 @@ class TestInvestigatorEndpointAndOpenAIFlow(unittest.TestCase):
             call_kwargs = mock_client.chat.completions.create.call_args.kwargs
             self.assertEqual(call_kwargs["model"], "gpt-4o-mini")
             self.assertEqual(call_kwargs["response_format"], {"type": "json_object"})
+
+    def test_endpoint_flow_with_openai_failure_fallback(self):
+        from unittest.mock import patch, MagicMock
+        from backend.reconciliation.matcher import Stage1Matcher
+
+        matcher = Stage1Matcher(self.session)
+        s1_rec = matcher.process_payment(self.pay)
+
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = Exception("Simulated quota exceeded (429)")
+
+            resp = self.client.post(
+                "/api/v1/investigator/run",
+                json={"payment_id": "pay_dc3111edc78c45"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["reconciliation_id"], s1_rec.id)
+            self.assertEqual(data["execution_source"], "FALLBACK")
+            self.assertEqual(data["verdict"], "RESOLVED_AFTER_INVESTIGATION")
+            self.assertTrue(data["validation_passed"])
 
     def test_endpoint_contract_with_reconciliation_id(self):
         from backend.reconciliation.matcher import Stage1Matcher

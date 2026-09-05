@@ -14,6 +14,7 @@ Supports Claude / OpenAI API with robust local structured reasoning fallback.
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 from sqlalchemy import select
@@ -25,6 +26,25 @@ except ImportError:
     OPENAI_API_KEY = None
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_log_text(text: str) -> str:
+    """Mask secrets, keys, and tokens from log messages and exception strings."""
+    if not text:
+        return ""
+    # Mask OpenAI sk- keys
+    s = re.sub(r"sk-[a-zA-Z0-9_\-\.]{12,}", "sk-********", str(text))
+    # Mask Bearer tokens
+    s = re.sub(r"(bearer\s+)[a-zA-Z0-9_\-\.]{8,}", r"\1********", s, flags=re.IGNORECASE)
+    # Mask auth headers / tokens / secret values
+    s = re.sub(
+        r"((?:authorization|password|token|secret|api[_-]?key)\s*[:=]\s*['\"]?)[^'\",\s]+(['\"]?)",
+        r"\1********\2",
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s
+
 
 from backend.models.payment import Payment
 from backend.models.reconciliation import ReconciliationRecord
@@ -56,6 +76,10 @@ class InvestigatorAgent:
         self.exception_service = ExceptionService(db_session)
         self.gater = EvidenceGater(db_session)
         self.api_key = api_key or OPENAI_API_KEY or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.provider = "openai"
+        self.model = "gpt-4o-mini"
+        self.last_execution_source: str = "FALLBACK"
+        self.last_telemetry: Dict[str, Any] = {}
 
     def investigate_payment(self, payment: Payment) -> ReconciliationRecord:
         """
@@ -74,7 +98,10 @@ class InvestigatorAgent:
 
         # 2. Reasoning Step (Model API or Structured Evidence Reasoning)
         raw_response = self._run_reasoning_step(payment, evidence_pkg)
-        explanation_payload: CandidateExplanationPayload = validate_agent_explanation(raw_response)
+        explanation_payload: CandidateExplanationPayload = validate_agent_explanation(
+            raw_response,
+            default_source=self.last_execution_source,
+        )
 
         # 3. Fetch normalized evidence records for validation
         evidence_records = self.tools.list_evidence_by_ids(explanation_payload.evidence_citations)
@@ -126,6 +153,7 @@ class InvestigatorAgent:
         rec.discrepancy = explanation_payload.discrepancy
         rec.scenario_type = payment.scenario_type
         rec.notes = f"[{explanation_payload.candidate_cause.upper()}] {explanation_payload.explanation} ({route_note})"
+        rec.execution_source = self.last_execution_source
 
         self.session.flush()
 
@@ -152,12 +180,17 @@ class InvestigatorAgent:
                 "payment_id": payment.id,
                 "amount": float(payment.amount),
                 "candidates_count": len(evidence_pkg.candidate_settlements),
+                "provider": self.last_telemetry.get("provider", self.provider),
+                "model": self.last_telemetry.get("model", self.model),
+                "api_key_detected": self.last_telemetry.get("api_key_detected", False),
             },
             output_snapshot={
                 "verdict": explanation_payload.verdict,
                 "reason": explanation_payload.reason,
                 "confidence": explanation_payload.confidence,
                 "explanation": explanation_payload.explanation,
+                "execution_source": self.last_execution_source,
+                "telemetry": self.last_telemetry,
             },
             evidence_refs=explanation_payload.evidence_citations,
             exception_id=exc_record.id if exc_record else None,
@@ -206,49 +239,133 @@ class InvestigatorAgent:
         """
         evidence_pkg = self.evidence_service.collect_evidence(payment)
         raw = self._run_reasoning_step(payment, evidence_pkg)
-        return validate_agent_explanation(raw)
+        return validate_agent_explanation(raw, default_source=self.last_execution_source)
 
     def _run_reasoning_step(self, payment: Payment, evidence: EvidencePackage) -> Dict[str, Any]:
         """
         Executes reasoning step. Calls model API if key is present,
-        or uses structured LLM reasoning engine for deterministic execution.
+        or activates local structured reasoning fallback with full observable telemetry.
         """
-        if self.api_key:
-            try:
-                import openai
-                client = openai.OpenAI(api_key=self.api_key)
-                user_msg = INVESTIGATION_USER_PROMPT_TEMPLATE.format(
-                    payment_id=payment.id,
-                    razorpay_payment_id=payment.razorpay_payment_id or payment.id,
-                    amount=f"{float(payment.amount):.2f}",
-                    currency=payment.currency or "INR",
-                    payer_name=payment.payer_name or "Unknown",
-                    payment_date=str(payment.payment_date),
-                    scenario_type=payment.scenario_type or "standard",
-                    candidate_invoices=json.dumps(evidence.candidate_invoices, indent=2, default=str),
-                    candidate_settlements=json.dumps(evidence.candidate_settlements, indent=2, default=str),
-                    refund_records=json.dumps(evidence.refund_records, indent=2, default=str),
-                    fee_schedule=json.dumps(evidence.fee_schedule, indent=2, default=str),
-                    prior_human_resolutions=json.dumps(evidence.prior_human_resolutions, indent=2, default=str),
-                )
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": INVESTIGATOR_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    response_format={"type": "json_object"},
-                    max_tokens=800,
-                )
-                content = resp.choices[0].message.content
-                if content:
-                    parsed = json.loads(content)
-                    if isinstance(parsed, dict) and (parsed.get("candidate_cause") or parsed.get("reason") or parsed.get("verdict")):
-                        return parsed
-            except Exception as e:
-                logger.warning(
-                    f"OpenAI API call failed ({type(e).__name__}: {e}); falling back to local structured reasoning."
-                )
+        api_key_detected = bool(self.api_key and str(self.api_key).strip())
+
+        if not api_key_detected:
+            telemetry_no_key = {
+                "provider": self.provider,
+                "model": self.model,
+                "api_key_detected": False,
+                "call_started": False,
+                "call_succeeded": False,
+                "call_failed": False,
+                "fallback_activated": True,
+            }
+            self.last_execution_source = "FALLBACK"
+            self.last_telemetry = telemetry_no_key
+            logger.info(
+                "OpenAI call skipped (API key not detected); fallback activated: %s",
+                json.dumps(telemetry_no_key),
+                extra=telemetry_no_key,
+            )
+            raw = self._structured_evidence_reasoning(payment, evidence)
+            raw["execution_source"] = "FALLBACK"
+            return raw
+
+        # API key detected: attempt OpenAI call with telemetry
+        telemetry_start = {
+            "provider": self.provider,
+            "model": self.model,
+            "api_key_detected": True,
+            "call_started": True,
+            "call_succeeded": False,
+            "call_failed": False,
+            "fallback_activated": False,
+        }
+        logger.info(
+            "OpenAI call started: %s",
+            json.dumps(telemetry_start),
+            extra=telemetry_start,
+        )
+
+        try:
+            import openai
+            client = openai.OpenAI(api_key=self.api_key)
+            user_msg = INVESTIGATION_USER_PROMPT_TEMPLATE.format(
+                payment_id=payment.id,
+                razorpay_payment_id=payment.razorpay_payment_id or payment.id,
+                amount=f"{float(payment.amount):.2f}",
+                currency=payment.currency or "INR",
+                payer_name=payment.payer_name or "Unknown",
+                payment_date=str(payment.payment_date),
+                scenario_type=payment.scenario_type or "standard",
+                candidate_invoices=json.dumps(evidence.candidate_invoices, indent=2, default=str),
+                candidate_settlements=json.dumps(evidence.candidate_settlements, indent=2, default=str),
+                refund_records=json.dumps(evidence.refund_records, indent=2, default=str),
+                fee_schedule=json.dumps(evidence.fee_schedule, indent=2, default=str),
+                prior_human_resolutions=json.dumps(evidence.prior_human_resolutions, indent=2, default=str),
+            )
+            resp = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": INVESTIGATOR_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=800,
+            )
+            content = resp.choices[0].message.content
+            if not content:
+                raise ValueError("OpenAI returned empty message content.")
+
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict) or not (
+                parsed.get("candidate_cause") or parsed.get("reason") or parsed.get("verdict")
+            ):
+                raise ValueError("OpenAI response payload missing required investigation fields.")
+
+            telemetry_success = {
+                "provider": self.provider,
+                "model": self.model,
+                "api_key_detected": True,
+                "call_started": True,
+                "call_succeeded": True,
+                "call_failed": False,
+                "fallback_activated": False,
+            }
+            self.last_execution_source = "OPENAI"
+            self.last_telemetry = telemetry_success
+            logger.info(
+                "OpenAI call succeeded: %s",
+                json.dumps(telemetry_success),
+                extra=telemetry_success,
+            )
+            parsed["execution_source"] = "OPENAI"
+            return parsed
+
+        except Exception as e:
+            err_type = type(e).__name__
+            safe_err = _sanitize_log_text(str(e))
+            telemetry_fail = {
+                "provider": self.provider,
+                "model": self.model,
+                "api_key_detected": True,
+                "call_started": True,
+                "call_succeeded": False,
+                "call_failed": True,
+                "error_type": err_type,
+                "error_message": safe_err,
+                "fallback_activated": True,
+            }
+            self.last_execution_source = "FALLBACK"
+            self.last_telemetry = telemetry_fail
+            logger.warning(
+                "OpenAI call failed (%s: %s); fallback activated: %s",
+                err_type,
+                safe_err,
+                json.dumps(telemetry_fail),
+                extra=telemetry_fail,
+            )
+            raw = self._structured_evidence_reasoning(payment, evidence)
+            raw["execution_source"] = "FALLBACK"
+            return raw
 
         return self._structured_evidence_reasoning(payment, evidence)
 

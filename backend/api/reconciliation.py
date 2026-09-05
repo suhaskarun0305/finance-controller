@@ -221,6 +221,7 @@ def run_investigator(
         evidence_ids.append(rec.invoice_id)
 
     validation_passed = rec.match_status in ("RESOLVED_AFTER_INVESTIGATION", "MATCHED")
+    exec_source = getattr(rec, "execution_source", getattr(investigator, "last_execution_source", "FALLBACK"))
 
     return InvestigatorRunResponse(
         reconciliation_id=rec.id,
@@ -231,4 +232,5 @@ def run_investigator(
         validation_passed=validation_passed,
         final_status=rec.match_status,
         explanation=rec.notes,
+        execution_source=exec_source,
     )
