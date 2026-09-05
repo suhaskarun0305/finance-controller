@@ -12,11 +12,19 @@ Supports Claude / OpenAI API with robust local structured reasoning fallback.
 """
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+try:
+    from backend.config.settings import OPENAI_API_KEY
+except ImportError:
+    OPENAI_API_KEY = None
+
+logger = logging.getLogger(__name__)
 
 from backend.models.payment import Payment
 from backend.models.reconciliation import ReconciliationRecord
@@ -47,7 +55,7 @@ class InvestigatorAgent:
         self.audit_service = AuditService(db_session)
         self.exception_service = ExceptionService(db_session)
         self.gater = EvidenceGater(db_session)
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = api_key or OPENAI_API_KEY or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
 
     def investigate_payment(self, payment: Payment) -> ReconciliationRecord:
         """
@@ -209,10 +217,19 @@ class InvestigatorAgent:
             try:
                 import openai
                 client = openai.OpenAI(api_key=self.api_key)
-                user_msg = (
-                    f"Payment: {payment.id}, amount={payment.amount}, currency={payment.currency}, "
-                    f"payer={payment.payer_name}, scenario={payment.scenario_type}\n"
-                    f"Evidence: {json.dumps(evidence.to_dict(), default=str)}"
+                user_msg = INVESTIGATION_USER_PROMPT_TEMPLATE.format(
+                    payment_id=payment.id,
+                    razorpay_payment_id=payment.razorpay_payment_id or payment.id,
+                    amount=f"{float(payment.amount):.2f}",
+                    currency=payment.currency or "INR",
+                    payer_name=payment.payer_name or "Unknown",
+                    payment_date=str(payment.payment_date),
+                    scenario_type=payment.scenario_type or "standard",
+                    candidate_invoices=json.dumps(evidence.candidate_invoices, indent=2, default=str),
+                    candidate_settlements=json.dumps(evidence.candidate_settlements, indent=2, default=str),
+                    refund_records=json.dumps(evidence.refund_records, indent=2, default=str),
+                    fee_schedule=json.dumps(evidence.fee_schedule, indent=2, default=str),
+                    prior_human_resolutions=json.dumps(evidence.prior_human_resolutions, indent=2, default=str),
                 )
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -225,9 +242,13 @@ class InvestigatorAgent:
                 )
                 content = resp.choices[0].message.content
                 if content:
-                    return json.loads(content)
-            except Exception:
-                pass  # Fallback to deterministic structured reasoning
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and (parsed.get("candidate_cause") or parsed.get("reason") or parsed.get("verdict")):
+                        return parsed
+            except Exception as e:
+                logger.warning(
+                    f"OpenAI API call failed ({type(e).__name__}: {e}); falling back to local structured reasoning."
+                )
 
         return self._structured_evidence_reasoning(payment, evidence)
 

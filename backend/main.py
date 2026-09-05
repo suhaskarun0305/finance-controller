@@ -20,6 +20,8 @@ from backend.api.metrics import router as metrics_router
 from backend.api.payments import router as payments_router
 from backend.api.settlements import router as settlements_router
 
+from fastapi.middleware.cors import CORSMiddleware
+
 # ---------------------------------------------------------------------------
 # FastAPI Application
 # ---------------------------------------------------------------------------
@@ -27,6 +29,15 @@ app = FastAPI(
     title="AI Finance Controller — Track 04",
     description="Payment + Settlement Reconciliation with AI-Powered Exception Investigation",
     version="1.0.0",
+)
+
+# Enable CORS for Swagger UI and dashboard clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ---------------------------------------------------------------------------

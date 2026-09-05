@@ -10,8 +10,23 @@ from pydantic import BaseModel, Field
 
 
 class InvestigatorRunRequest(BaseModel):
-    reconciliation_id: Optional[str] = None
-    payment_id: Optional[str] = None
+    reconciliation_id: Optional[str] = Field(
+        default=None,
+        description="UUID of an existing unresolved ReconciliationRecord to investigate.",
+    )
+    payment_id: Optional[str] = Field(
+        default=None,
+        description="Payment identifier (UUID or razorpay_payment_id like 'pay_dc3111edc78c45').",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "reconciliation_id": "b1e5f8a0-2f9b-4e6a-8b1c-3d2e1a0f5c9b",
+                "payment_id": "pay_dc3111edc78c45",
+            }
+        }
+    }
 
 
 class InvestigatorRunResponse(BaseModel):

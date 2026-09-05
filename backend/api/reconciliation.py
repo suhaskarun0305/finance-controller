@@ -143,29 +143,92 @@ def run_investigator(
 ):
     """
     Trigger Stage 2 AI Investigation on an unresolved case per PRD Section 12 & 16.
+    Accepts reconciliation_id, payment_id, or both.
     """
-    investigator = InvestigatorAgent(db)
+    if not req.reconciliation_id and not req.payment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'reconciliation_id' or 'payment_id' must be provided.",
+        )
 
-    payment = None
+    payment: Optional[Payment] = None
+    existing_rec: Optional[ReconciliationRecord] = None
+
+    # 1. If reconciliation_id is provided, look up the existing case
+    if req.reconciliation_id:
+        existing_rec = db.get(ReconciliationRecord, req.reconciliation_id)
+        if not existing_rec:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Reconciliation case '{req.reconciliation_id}' not found.",
+            )
+        if existing_rec.payment_id:
+            payment = db.get(Payment, existing_rec.payment_id)
+            if not payment:
+                payment = db.scalars(
+                    select(Payment).where(Payment.razorpay_payment_id == existing_rec.payment_id)
+                ).first()
+
+    # 2. If payment_id is provided, resolve payment and verify/link reconciliation case
     if req.payment_id:
-        payment = db.get(Payment, req.payment_id)
-    elif req.reconciliation_id:
-        rec = db.get(ReconciliationRecord, req.reconciliation_id)
-        if rec and rec.payment_id:
-            payment = db.get(Payment, rec.payment_id)
+        p = db.get(Payment, req.payment_id)
+        if not p:
+            p = db.scalars(
+                select(Payment).where(Payment.razorpay_payment_id == req.payment_id)
+            ).first()
+        if not p:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Payment '{req.payment_id}' not found.",
+            )
+
+        # If payment was already identified via reconciliation_id, ensure consistency
+        if payment and payment.id != p.id and payment.razorpay_payment_id != p.razorpay_payment_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provided reconciliation_id belongs to payment '{payment.razorpay_payment_id or payment.id}', not '{req.payment_id}'.",
+            )
+        payment = p
+
+        # If existing_rec was not provided by ID, find latest case for this payment
+        if not existing_rec:
+            existing_rec = db.scalars(
+                select(ReconciliationRecord)
+                .where(ReconciliationRecord.payment_id == payment.id)
+                .order_by(ReconciliationRecord.created_at.desc())
+            ).first()
 
     if not payment:
-        raise HTTPException(status_code=404, detail="Payment for investigation not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Payment associated with the reconciliation case could not be found.",
+        )
 
+    # If no reconciliation record exists yet, initialize it through Stage 1 matcher
+    if not existing_rec:
+        matcher = Stage1Matcher(db)
+        existing_rec = matcher.process_payment(payment)
+
+    # 3. Execute Stage 2 AI Investigation
+    investigator = InvestigatorAgent(db)
     rec = investigator.investigate_payment(payment)
+
+    # Extract cited evidence IDs
+    evidence_ids = []
+    if rec.settlement_id:
+        evidence_ids.append(rec.settlement_id)
+    if rec.invoice_id:
+        evidence_ids.append(rec.invoice_id)
+
+    validation_passed = rec.match_status in ("RESOLVED_AFTER_INVESTIGATION", "MATCHED")
 
     return InvestigatorRunResponse(
         reconciliation_id=rec.id,
         verdict=rec.match_status,
         reason=rec.scenario_type or "INVESTIGATION_COMPLETE",
-        confidence=rec.match_score or 0.95,
-        evidence_ids=[rec.settlement_id] if rec.settlement_id else [],
-        validation_passed=True,
+        confidence=rec.match_score if rec.match_score is not None else 0.95,
+        evidence_ids=evidence_ids,
+        validation_passed=validation_passed,
         final_status=rec.match_status,
         explanation=rec.notes,
     )
