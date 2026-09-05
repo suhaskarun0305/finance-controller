@@ -8,9 +8,9 @@ This guide walks through demonstrating the AI Finance Controller system end-to-e
 
 Start the FastAPI application and dashboard:
 ```bash
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload
 ```
-Open your browser to: **`http://localhost:8000`** (or `/dashboard`).
+Open your browser to: **`http://localhost:8001`** (or `/dashboard`).
 
 ---
 

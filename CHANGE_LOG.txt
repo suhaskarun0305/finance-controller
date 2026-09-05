@@ -1,3 +1,52 @@
+### 2026-09-05 14:18
+**Change:** Repository audit and reconciliation of documentation, port configuration, Razorpay integration claims, and artifact cleanup.
+
+**Reason:** Eliminate discrepancies between code and documentation (test counts, local server port, API endpoints, Razorpay synthetic data vs external integration, and accidental repository artifacts).
+
+**Files changed:**
+- `README.md`
+- `docs/demo-script.md`
+- `PROJECT_STATUS.txt`
+- `CHANGE_LOG.txt`
+- `Get-Content` (deleted from git repository)
+
+**Implementation:**
+- Synchronized `README.md` test count from obsolete "33" to the verified "45" tests across unit, integration, and evaluation suites.
+- Corrected server port references across `README.md`, `docs/demo-script.md`, and `PROJECT_STATUS.txt` to reflect the canonical port 8001 (`http://127.0.0.1:8001`).
+- Added the `/api/v1/investigator/run` endpoint to `README.md` under Reconciliation APIs.
+- Reconciled Razorpay integration claims across `README.md` and `PROJECT_STATUS.txt`: clearly separated seeded synthetic Razorpay-shaped data (199 records in SQLite) from external Razorpay Payments API, Settlements API, and Webhook integrations (which are not implemented or connected).
+- Documented OpenAI integration separately across code implementation, configuration, attempted live call, 429 quota exhaustion, and deterministic fallback.
+- Removed accidental 0-byte root-level `Get-Content` artifact from the git repository using `git rm`.
+
+**Integration changes:**
+- Corrected documentation and status matrices: external Razorpay APIs/webhooks marked NOT CONNECTED / NOT IMPLEMENTED; local server port documented as 8001.
+
+**Tests / verification:**
+- `python -m unittest discover -s tests -v` — PASS (45/45 tests passed in 7.247s).
+- `Invoke-RestMethod -Uri 'http://127.0.0.1:8001/health/db'` — PASS (`status: healthy`, `database: connected`, `result: 1`).
+- `git rm Get-Content` — PASS (file removed and staged).
+
+**Current status:**
+- Documentation & Status Alignment — RUNTIME VERIFIED
+- Razorpay Integrations Status — AUDITED & CORRECTED (Synthetic seeded data only)
+- OpenAI Integration — CODE IMPLEMENTED / CONFIGURED (Fallback active due to external 429 quota)
+- Full Test Suite — 45/45 RUNTIME VERIFIED
+
+**Remaining work created by this change:**
+- None.
+
+**Human / external work:**
+- Add OpenAI credits to organization billing at https://platform.openai.com/settings/organization/billing/ if live model calls are required.
+- Provide external Razorpay API Key ID, Secret, and Webhook secret if live platform integration is desired.
+
+**Blockers / risks:**
+- None.
+
+**Next action:**
+- Commit and present final audit report to the user.
+
+---
+
 ### 2026-09-05 14:05
 **Change:** Completed observability, reasoning_provider metadata, validation decoupling, and test suite for Finance Controller Stage 2 Investigator.
 

@@ -1,15 +1,15 @@
 # Project Status
 
 ## Last verified
-2026-09-05 14:05 IST
+2026-09-05 14:15 IST
 
 ## Overall status
-Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational and runtime-verified, with observable and secret-safe OpenAI telemetry, explicit `reasoning_provider` tracking, decoupled validation reporting, and deterministic local fallback.
+Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational and runtime-verified on port 8001 using seeded synthetic Razorpay-shaped data, with observable and secret-safe OpenAI telemetry, explicit `reasoning_provider` tracking, decoupled validation reporting, and deterministic local fallback. External Razorpay APIs/webhooks are not connected.
 
 ## Completed
-- Verified FastAPI application running locally on port 8000 with CORS support.
-- Verified `/health/db` returns connected status.
-- Verified `GET /api/v1/payments` returns 199 seeded payment records.
+- Verified FastAPI application running locally on port 8001 with CORS support.
+- Verified `/health/db` returns connected status on `http://127.0.0.1:8001/health/db`.
+- Verified `GET /api/v1/payments` returns 199 seeded synthetic payment records.
 - Verified `POST /api/v1/investigator/run` accepts both `reconciliation_id` and `payment_id` (UUID and `razorpay_payment_id`).
 - Implemented structured logging around OpenAI calls with secret sanitization (no keys or tokens leaked).
 - Implemented observable telemetry, `reasoning_provider`, `model_provider`, and `execution_source` (`OPENAI` | `FALLBACK`) across API response schema, models, and audit logs.
@@ -17,30 +17,34 @@ Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational an
 - Added comprehensive unit and integration tests verifying OpenAI mocked success, failure fallback, validation pass/fail decoupling, and human review routing.
 - Verified all 45 test cases pass in `tests/`.
 - Verified live end-to-end execution on real payment `21787d67-f578-4e86-b26f-d91d1b4e03a2`.
+- Removed accidental root-level `Get-Content` artifact.
 
 ## In progress
 - Monitoring live reconciliation exceptions and human review workflows.
 
 ## Remaining work
 - [ ] Add OpenAI billing credits externally if live production inference is required.
-- [ ] Implement end-to-end webhook receiver verification for real-time Razorpay events.
+- [ ] Implement external Razorpay Payments API client (`api.razorpay.com/v1/payments`) if live synchronization is desired.
+- [ ] Implement external Razorpay Settlements API client (`api.razorpay.com/v1/settlements`) if automated settlement fetching is desired.
+- [ ] Implement Razorpay webhook receiver endpoint with HMAC SHA-256 signature verification if real-time ingestion is desired.
 
 ## Human / external work
 - [ ] Add OpenAI credits to organization billing at https://platform.openai.com/settings/organization/billing/ (current account balance is exhausted).
+- [ ] Provide Razorpay API Key ID, Key Secret, and Webhook Secret if live Razorpay platform integration is planned.
 
 ## Integrations
 | Component | Code | Configured | Connected | Runtime Verified | Production Verified | Notes |
 |---|---|---|---|---|---|---|
-| OpenAI | ✅ | ✅ | ⚠️ | ✅ | ❌ | Key configured locally; live call returns 429 quota exhausted; fallback works cleanly |
-| Razorpay Payments | ✅ | ✅ | ✅ | ✅ | ❌ | 199 seeded payments verified via API & DB |
-| Razorpay Settlements | ✅ | ✅ | ✅ | ✅ | ❌ | Seeded settlements and fee schedule loaded |
-| Razorpay Webhooks | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ | Handlers implemented; live webhook endpoint pending external webhook simulation |
-| Database | ✅ | ✅ | ✅ | ✅ | ❌ | SQLite file connected, healthy, all tables seeded |
-| Deployment | ✅ | ✅ | ✅ | ✅ | ❌ | Local Uvicorn server running on 127.0.0.1:8000 with reload |
+| OpenAI | ✅ | ✅ | ⚠️ | ✅ | ❌ | Code implemented; key configured in `.env`; live call attempted (returns 429 quota exhausted); deterministic fallback active & runtime verified. |
+| Razorpay Payments | ❌ | ❌ | ❌ | ❌ | ❌ | **Synthetic data only.** 199 seeded payments with Razorpay schemas (`razorpay_payment_id`). No external API client or credentials. |
+| Razorpay Settlements | ❌ | ❌ | ❌ | ❌ | ❌ | **Synthetic data only.** Seeded settlements and standard fee schedules loaded locally in SQLite. No external API client or credentials. |
+| Razorpay Webhooks | ❌ | ❌ | ❌ | ❌ | ❌ | Not implemented. No webhook receiver endpoints or signature validation logic in codebase. |
+| Database | ✅ | ✅ | ✅ | ✅ | ❌ | SQLite file connected (`finance_controller.db`), healthy, all tables seeded; PostgreSQL dual-compatible via SQLAlchemy. |
+| Deployment | ✅ | ✅ | ✅ | ✅ | ❌ | Local Uvicorn server running on `http://127.0.0.1:8001` with reload enabled. |
 
 ## API status
-- `POST /api/v1/investigator/run` updated with `reasoning_provider`, `model_provider`, `execution_source`, and decoupled `validation_passed`.
-- CORS middleware active for local web clients and Swagger UI.
+- `POST /api/v1/investigator/run` active, supporting `payment_id` and/or `reconciliation_id`, returning `reasoning_provider`, `model_provider`, `execution_source`, and decoupled `validation_passed`.
+- CORS middleware active for local web clients and Swagger UI (`http://127.0.0.1:8001/docs`).
 
 ## Database status
 - SQLite database (`finance_controller.db`) connected and seeded with 199 payments, customers, invoices, and settlements.
@@ -50,7 +54,7 @@ Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational an
 - 45 passed, 0 failed, 0 errors (`Ran 45 tests in 6.843s - OK`).
 
 ## Deployment
-- Uvicorn running on http://127.0.0.1:8000 with reload enabled.
+- Uvicorn running on `http://127.0.0.1:8001` with reload enabled.
 
 ## Blockers and risks
 - External OpenAI account has 0 credits remaining (`credit_balance_exhausted`), causing live inference to activate local structured fallback. System handles this safely without crash or downtime.
@@ -58,6 +62,8 @@ Finance Controller Stage 1 & Stage 2 AI Investigation pipeline is operational an
 ## Decisions / assumptions
 - Structured logging uses JSON-formatted dictionaries in `extra` and log string to ensure both structured collectors and stdout log stream capture telemetry.
 - API keys, bearer tokens, and auth headers are automatically sanitized via regex pattern matching before logging.
+- Canonical local dev server runs on port 8001.
 
 ## Recommended next action
 Top up OpenAI account credits if live model evaluations are required; otherwise continue running with deterministic Stage 2 structured reasoning.
+

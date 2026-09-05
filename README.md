@@ -111,10 +111,25 @@ Executes the complete 2-stage pipeline:
 ### 5. Start the Dashboard
 
 ```bash
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to access the interactive dashboard.
+Open [http://127.0.0.1:8001](http://127.0.0.1:8001) to access the interactive dashboard.
+
+---
+
+## Integrations & Data Truth Matrix
+
+To maintain full transparency regarding external connectivity versus synthetic data:
+
+| Integration / Data Source | Status | Description |
+|---------------------------|--------|-------------|
+| **Seeded / Synthetic Razorpay Data** | ✅ **ACTIVE / SEEDED** | 199 payments, settlements, invoices, and refunds generated locally with realistic Razorpay-shaped schemas (`pay_...`, `set_...`, `rfnd_...`, 2% + 18% GST fee schedules). |
+| **External Razorpay Payments API** | ❌ **NOT CONNECTED** | No live API client, external credentials, or outbound HTTP requests to `api.razorpay.com/v1/payments`. |
+| **External Razorpay Settlements API**| ❌ **NOT CONNECTED** | No live API client, external credentials, or automated fetching from Razorpay's Settlements API. |
+| **External Razorpay Webhooks** | ❌ **NOT CONNECTED** | No live webhook receiver endpoint or HMAC SHA-256 signature verification implemented. |
+| **OpenAI LLM Integration** | ⚠️ **FALLBACK ACTIVE** | **Code Implemented**: Yes (`backend/agents/investigator.py`).<br>**Key Configured**: Yes (detected in `.env`).<br>**Live Call Attempted**: Yes (`gpt-4o-mini`).<br>**Live Call Succeeded**: No (`429 RateLimitError - insufficient_quota` / 0 credits remaining).<br>**Fallback Behavior**: Gracefully catches error without exposing secrets, logs safe structured telemetry, and executes deterministic rule-based reasoning. |
+| **Database** | ✅ **CONNECTED** | Local SQLite (`finance_controller.db`) connected and healthy; PostgreSQL dual-compatible via SQLAlchemy. |
 
 ---
 
@@ -138,6 +153,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to access the interactive da
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/reconciliation/run` | Run reconciliation (single or batch) |
+| `POST` | `/api/v1/investigator/run` | Run Stage 2 AI Investigation on an unresolved payment (accepts `payment_id` and/or `reconciliation_id`) |
 | `GET` | `/api/v1/reconciliation/records` | List reconciliation records with filters |
 | `GET` | `/api/v1/candidates/{payment_id}` | Get candidate settlements for a payment |
 
@@ -164,7 +180,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to access the interactive da
 | `GET` | `/api/v1/payments` | List payments |
 | `GET` | `/api/v1/settlements` | List settlements |
 
-Full OpenAPI documentation: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+Full OpenAPI documentation: [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs)
 
 ---
 
@@ -182,7 +198,7 @@ The interactive dashboard provides:
 ## Testing
 
 ```bash
-# Run all tests (33 unit + integration tests)
+# Run all tests (45 tests across unit, integration, and evaluation suites)
 python -m unittest discover -s tests -v
 
 # Run specific test suites
